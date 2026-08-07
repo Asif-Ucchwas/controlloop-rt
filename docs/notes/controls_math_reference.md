@@ -344,3 +344,104 @@ ideal conditions, but I explicitly stress-tested it with an unmodeled
 disturbance and found the guarantee degrades - about 30% over the limit
 versus PD's 49% over. That's expected for nominal MPC, and it's exactly
 why robust or tube MPC exists as the production-grade extension."
+
+---
+
+## 8. Damping Ratio From Given Poles (Reverse Direction)
+
+Section 4 went ζ,ωₙ -> poles (design direction). The reverse -- given
+measured poles, recover ζ and ωₙ -- is exactly what was used to diagnose
+the failed Ki=40 PID attempt in Section 3, but the arithmetic was never
+shown. For a complex pole pair p = -a +/- jb:
+
+    omega_n = sqrt(a^2 + b^2)          (distance from origin in s-plane)
+    zeta    = a / omega_n              (fraction of that distance along
+                                         the negative real axis)
+
+**Worked example (the failed Ki=40 attempt):** measured poles were
+-0.8819 +/- j1.9482.
+
+    omega_n = sqrt(0.8819^2 + 1.9482^2) = sqrt(0.7777 + 3.7955) = sqrt(4.5732) = 2.1385
+    zeta    = 0.8819 / 2.1385 = 0.4124
+
+Matches the "zeta≈0.41" figure quoted when diagnosing that result --
+this is the actual arithmetic behind that number. Rule of thumb: zeta < 0.7
+means visibly underdamped/oscillatory; zeta >= 1.0 means no oscillation at
+all (overdamped or critically damped).
+
+## 9. Metrics & Definitions Used Throughout
+
+These formulas were implemented directly in code (never derived from
+control theory) but are used as the reported numbers in every DEVLOG
+entry and benchmark table -- worth having explicit for "how exactly did
+you compute X" questions.
+
+**RMS (root-mean-square) tracking error**, over N samples of error e_i:
+
+    RMS = sqrt( (1/N) * sum(e_i^2) )
+
+Used in Task 3's feedforward comparison (87.4% RMS reduction). RMS is
+preferred over simple average error because squaring penalizes large
+transient errors more than an average would -- a controller with one huge
+spike and otherwise-zero error scores worse on RMS than on mean error,
+which better reflects real tracking quality.
+
+**Max (peak) tracking error:**
+
+    max_error = max(|e_i|)  for i in 1..N
+
+The single worst instantaneous error -- useful alongside RMS since a
+controller can have excellent RMS error but one dangerous spike that RMS
+alone would hide.
+
+**Control chatter (Task 8's noise-sensitivity metric):**
+
+    chatter = std( u_{k+1} - u_k )   for all consecutive control samples
+
+The standard deviation of the *change* in control signal between
+consecutive steps -- not the standard deviation of u itself. This
+specifically measures how much the control signal jumps around step to
+step, which is what actually stresses real actuator hardware (a
+consistently high but smooth voltage is fine; a rapidly oscillating one
+isn't).
+
+**Settling time (2% band) -- exact algorithm used in every script:**
+
+    tolerance = 0.02 * target
+    settling_time = first t_i such that |theta_j - target| < tolerance
+                    for ALL j >= i   (not just at t_i itself)
+
+This "for all subsequent samples" condition matters: checking only the
+instant it first crosses the tolerance band would falsely report settling
+if the signal dips back out again later (e.g., during oscillation). This
+is why Task 7's N=5 case correctly returned "None" -- theta kept
+overshooting far outside the band even after briefly crossing near target.
+
+**Overshoot (percentage above final value):**
+
+    overshoot_pct = (max(theta) - final_value) / final_value * 100    [if max > final]
+    overshoot_pct = 0                                                  [otherwise]
+
+Caution (the Task 5 lesson): this formula divides by final_value, so if
+final_value is near zero, small numerator differences produce huge,
+meaningless percentages (Task 7's N=5 case: -5137.98%). Always sanity-check
+overshoot% against the raw theta trace when final_value is small.
+
+## 10. Discretization Scheme (Simulation Methodology)
+
+Every custom simulation loop (PD, feedforward, stress test -- NOT the
+do-mpc simulator, which uses its own internal integrator) advances the
+continuous-time state-space model using explicit (forward) Euler
+integration:
+
+    x_{k+1} = x_k + (A*x_k + B*u_k) * dt
+
+This is the simplest possible numerical integration scheme: assume the
+derivative x_dot = Ax+Bu is constant over the small interval dt, and step
+forward linearly. It has known accuracy limits (local error scales with
+dt^2, global error with dt) -- justified here because dt=0.001s for the
+1kHz PD loop and dt=0.02s for the 50Hz MPC loop are both small relative to
+the plant's own time constant (~0.12s from Stage 1's poles), so the
+approximation error stays small. Worth naming explicitly in the paper's
+Methodology section as a stated, deliberate simplification, same
+convention as neglecting armature inductance in Section 1.
