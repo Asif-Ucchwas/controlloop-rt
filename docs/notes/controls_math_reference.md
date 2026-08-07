@@ -306,3 +306,41 @@ How to reuse this pattern for any new plant/controller you tune later:
     5. For MPC: write out the cost function with your actual N/Q/R values
        before touching code, so you know what behavior you're asking the
        solver to produce.
+
+---
+
+## 7. Nominal vs. Robust MPC (Why Constraints Can Still Be Violated)
+
+**The gap our stress test exposed:** MPC's constraint guarantee
+(x_min <= x_k <= x_max, enforced by the solver) is only as good as the
+model f(x,u) used inside the optimization. If the true plant experiences
+a disturbance the model doesn't know about:
+
+    x_true_{k+1} = f(x_k, u_k) + d_k     (d_k = unmodeled disturbance)
+
+...then the solver's predicted x_k+1 (computed using only f, not d) can
+diverge from reality. The constraint was satisfied in the *solver's plan*,
+not necessarily in the *real trajectory* that actually unfolds.
+
+**Measured on our plant:** ideal conditions (Task 6) -> constraint held
+exactly (2.883 vs 3.0 rad/s limit). Same constraint, same controller,
+under an unmodeled disturbance (Task 8) -> violated by 30.4%.
+
+**What actually fixes this (named as future work, not implemented here):**
+robust MPC formulations bound the disturbance explicitly, e.g. tube MPC
+tightens the constraint by a safety margin computed from the disturbance
+bound:
+
+    x_min + margin(d) <= x_k <= x_max - margin(d)
+
+so that even in the worst case within the assumed disturbance bound, the
+TRUE state stays within the original limit. This is a real, standard
+extension - worth naming explicitly if asked "how would you make this
+production-safe," since claiming nominal MPC alone is safety-guaranteed
+under real disturbances would be an overclaim.
+
+**Interview-ready one-liner:** "My MPC's constraints held exactly under
+ideal conditions, but I explicitly stress-tested it with an unmodeled
+disturbance and found the guarantee degrades - about 30% over the limit
+versus PD's 49% over. That's expected for nominal MPC, and it's exactly
+why robust or tube MPC exists as the production-grade extension."
