@@ -513,6 +513,28 @@ overshoot% against the raw theta trace when final_value is small.
 
 ---
 
+## 9b. Timing Jitter (RTOS Metric, Stage 3)
+
+    jitter_us = max_period_us - min_period_us
+
+Over N measured control-loop wake periods. Simple range-based definition
+(not standard deviation) - chosen because for a real-time deadline claim,
+the WORST-case deviation matters more than the average spread; a single
+large outlier is a missed deadline regardless of how tight every other
+period was.
+
+Measured on our Zephyr port (Stage 3, Task 12): jitter=0us over 2999
+periods, even under a deliberately harder stress test (randomized 1-4ms
+competing load, 1us measurement resolution). Root cause of the exact
+zero: native_sim's simulation model does not include silicon-level
+interrupt latency, cache effects, or bus contention - the physical
+sources of real jitter simply aren't present in the simulation, so no
+amount of scheduling-level stress can surface them. This is a property
+of the simulator, not evidence the real-time claim is unconditionally
+true; genuine jitter numbers require real hardware (Stage 7).
+
+---
+
 ## 10. Discretization Scheme (Simulation Methodology)
 
 Every custom simulation loop (PD, feedforward, stress test -- NOT the

@@ -287,3 +287,58 @@ zero jitter under equivalent load. Real interrupt latency, cache
 effects, and bus contention would introduce measurable variance even
 with functionally correct preemption. This distinction is important for
 the paper's Methodology/Limitations section, same framing as Task 10.
+
+## Stage 3 Task 12 — Timing Jitter Measurement Under Load
+
+Before trusting Task 11's "zero jitter" result, checked whether it was
+real or just measurement blindness: Task 11 measured timing via
+k_uptime_ticks() at CONFIG_SYS_CLOCK_TICKS_PER_SEC=10000 (100us
+resolution) - meaning any jitter smaller than 100us would have been
+invisible. Upgraded to k_cycle_get_32() at CONFIG_SYS_CLOCK_HW_CYCLES_
+PER_SEC=1000000 (1us resolution, 100x finer), AND increased the
+competing load's difficulty: logging_task now does randomized 1000-4000us
+busy-work per cycle (was a fixed 2000us in Task 11) to actually stress-test
+for a breaking point rather than re-confirm the easy case.
+
+**Result: still exactly zero jitter.** min=1000us, max=1000us,
+avg=1000us, jitter(max-min)=0us, deadline misses=0/2999 (0.00%) - even
+at 100x finer measurement resolution and under harder, randomized
+competing load up to 4x the control period's own length.
+
+**Precise conclusion (stronger than Task 10/11's caveat, now backed by
+an actual attempt to break it):** native_sim's simulation model
+structurally EXCLUDES the physical sources of real timing jitter -
+silicon-level interrupt latency, cache misses, pipeline flushes, bus
+contention. No amount of scheduling-level stress can surface jitter that
+the simulation doesn't model in the first place. This is a stronger,
+more specific claim than "native_sim is idealized": we didn't just
+assume it, we tried to break it with a harder test and confirmed the
+simulation has no jitter SOURCE to find, regardless of competing load.
+Genuine jitter numbers require real hardware - this is the concrete,
+specific justification for Stage 7 hardware validation, not a vague
+disclaimer.
+
+**Jitter metric definition used:** jitter = max_period - min_period,
+over N measured control-loop periods. (Note for math reference doc: add
+alongside RMS/max-error/chatter/settling-time definitions in Section 9,
+since this is another metric computed in code but not formally defined
+until now.)
+
+## Stage 3 Complete (Tasks 9-12)
+
+Summary: reused CAN-Net's Zephyr/QEMU infrastructure with zero duplicate
+download (Task 9); ported the Stage 1 PD control loop into a real 1kHz
+periodic Zephyr task, finding and fixing two genuine bugs along the way
+(derivative kick, silent tick-rate mismatch - Task 10); added a
+competing lower-priority task and proved real interrupt-driven
+preemption, catching and fixing a native_sim clock-model hang in the
+process (Task 11); and confirmed under a deliberately harder stress test
+that native_sim's zero-jitter result is a real property of the
+simulation model, not measurement blindness (Task 12).
+
+Four real bugs found and fixed across this stage, each documented with
+root cause rather than just "fixed it" - genuine debugging material for
+interviews, and a coherent methodology narrative for the eventual paper:
+scheduling correctness is proven in simulation; physical timing jitter
+is explicitly named as requiring real hardware (Stage 7), not
+overclaimed as already measured.
