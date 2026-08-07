@@ -4,3 +4,5 @@ __pycache__/
 .ipynb_checkpoints/
 *.png
 !docs/notes/**/*.png
+stage3_rtos/build/
+zephyr.exe

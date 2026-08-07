@@ -175,3 +175,74 @@ it's (a) explicit state constraint handling under nominal conditions, and
 Both are real, measured, and honestly scoped, including where MPC's
 guarantees break down (unmodeled disturbances) - a more credible and
 interview-defensible story than an uncomplicated "MPC beats PID" claim.
+
+## Stage 3 Task 9 — Reuse CAN-Net Zephyr/QEMU Infrastructure
+
+Created a new out-of-tree Zephyr application (stage3_rtos/control_loop_rt/)
+that builds against the SAME shared west workspace as CAN-Net
+(~/projects/can-net/zephyr_project/), avoiding a second ~1GB+ SDK/module
+download. Key mechanism: CMakeLists.txt uses
+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE}), and west build's
+-s (source/app dir) and -d (build dir) flags let it build an app living
+entirely outside the workspace tree, while west resolves ZEPHYR_BASE
+internally by locating the workspace's .west config (found by running
+west from inside the CAN-Net zephyr_project directory).
+
+Verified with a minimal printk-only main.c: clean build (100/100), ran
+under native_sim, correct boot banner and output confirmed. No
+ZEPHYR_BASE export needed in .bashrc - west handles this per-invocation
+based on where it's run from and the -s/-d flags.
+
+Reused: zephyr_venv (Python venv with west), zephyr-sdk-1.0.1 (SDK,
+globally installed), zephyr_project/zephyr (Zephyr 4.4.99 source tree,
+same version CAN-Net used).
+
+## Stage 3 Task 10 — Port PD Control Loop into Periodic Zephyr Task
+
+Ported Stage 1's PD controller (Kp=144, Kd=6.79) and DC servo plant model
+into a C-based periodic Zephyr task (stage3_rtos/control_loop_rt/),
+running under native_sim, using k_timer + k_sem for fixed-rate 1kHz
+scheduling instead of a Python for-loop.
+
+Two real bugs found and fixed on first run:
+
+**Bug 1 - Derivative kick (144x voltage spike at t=0):** the C port
+initially differentiated ERROR (error - prev_error)/dt, same as Stage 1's
+Python script. At t=0, error jumps instantly from 0 to 1.0 (target minus
+initial theta=0), producing a huge fake derivative (u=6934V on the first
+step). This is a known control-engineering issue called "derivative
+kick" - almost certainly present in Stage 1's Python PD script too, just
+never surfaced since we never printed/checked the first-step voltage
+there. Fixed with the standard technique: derivative-on-measurement,
+differentiating theta directly (-(theta-prev_theta)/dt) instead of
+error, since the plant state changes smoothly even when the target
+doesn't. Confirmed fix: first-step u=144.00V (pure P-term, as expected
+since prev_theta=theta=0 initially).
+
+**Bug 2 - Silent timing mismatch (requested 1ms, got 10ms):**
+native_sim's default CONFIG_SYS_CLOCK_TICKS_PER_SEC=100 means the RTOS
+can only resolve time in 10ms ticks. Our K_MSEC(1) request was silently
+rounded up to the nearest tick with no warning - the loop was actually
+running at 100Hz, not the requested 1kHz, and nothing in the build or
+run output flagged this. Found by explicitly measuring and printing
+actual inter-wake periods rather than trusting the requested rate. Fixed
+by raising CONFIG_SYS_CLOCK_TICKS_PER_SEC=10000 (0.1ms tick resolution)
+in prj.conf. Confirmed fix: measured periods now read exactly 1000us
+(1ms) consistently.
+
+**Important honest caveat for the timing claim:** native_sim's clock is
+a deterministic simulated clock, not a model of real hardware interrupt
+latency, cache effects, or OS scheduling jitter. The "perfect" 1000us/
+1000us min/max period seen here reflects native_sim's idealized timing
+model, NOT proof of zero real-world jitter. Genuine timing variability
+will only appear once a second competing task is added (Task 11) or on
+real hardware (optional Stage 7) - this distinction matters for the
+paper's Methodology/Limitations section.
+
+Result: theta converges to 1.0000 by t=1.0s, matching Stage 1's Python
+PD baseline (0.447s settling, zero steady-state error) - confirms the C
+port is behaviorally equivalent to the validated Python model, not just
+"it compiles."
+
+Reused CAN-Net's zephyr_project workspace and zephyr_venv per Task 9 -
+no duplicate SDK/module download.
