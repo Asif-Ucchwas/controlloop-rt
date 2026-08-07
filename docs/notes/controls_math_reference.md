@@ -1,7 +1,7 @@
 # Controls Math Reference — Interview Prep
 
-Formula → derivation → where it's implemented. Extended as each stage adds
-new math (MPC's QP formulation, RTOS jitter statistics, etc.).
+Formula -> derivation -> where it's implemented. Extended as each stage
+adds new math (RTOS jitter statistics, functional safety math, etc.).
 
 ---
 
@@ -12,142 +12,214 @@ new math (MPC's QP formulation, RTOS jitter statistics, etc.).
 Two coupled subsystems:
 
 **Electrical (Kirchhoff's voltage law around the armature loop):**
-`V` = applied voltage, `i` = armature current, `L` = inductance, `R` =
-resistance, `K·θ̇` = back-EMF (motor generates a voltage opposing its own
-spin, proportional to speed).
 
-**Mechanical (Newton's law for rotation, torque = J·angular acceleration):**
-`J` = rotor inertia, `b` = viscous friction (drag proportional to speed),
-`K·i` = motor torque (proportional to current).
+    L*(di/dt) + R*i = V - K*theta_dot
+
+V = applied voltage, i = armature current, L = inductance, R = resistance,
+K*theta_dot = back-EMF (motor generates a voltage opposing its own spin,
+proportional to speed).
+
+**Mechanical (Newton's law for rotation, torque = J*angular acceleration):**
+
+    J*theta_ddot + b*theta_dot = K*i
+
+J = rotor inertia, b = viscous friction (drag proportional to speed),
+K*i = motor torque (proportional to current).
 
 ### Simplification: neglect inductance
 
 Electrical dynamics settle on the order of milliseconds; mechanical
 dynamics settle on the order of tenths of a second. So we assume the
-electrical loop is always at steady state (`di/dt ≈ 0`):
+electrical loop is always at steady state (di/dt ~= 0):
+
+    R*i = V - K*theta_dot
+    i = (V - K*theta_dot) / R
+
 Substitute into the mechanical equation:
-Note the `K²/R` term: this is "electrical damping" — the motor's own
+
+    J*theta_ddot + b*theta_dot = K*(V - K*theta_dot)/R
+    J*theta_ddot + b*theta_dot = (K/R)*V - (K^2/R)*theta_dot
+    J*theta_ddot + (b + K^2/R)*theta_dot = (K/R)*V        <- final 2nd-order ODE
+
+Note the K^2/R term: this is "electrical damping" -- the motor's own
 back-EMF acts like extra mechanical friction. It's a real physical effect,
 not a modeling artifact.
 
 ### State-space form
 
-Let `x1 = θ` (position), `x2 = θ̇` (velocity). Then `ẋ1 = x2` by
-definition, and `ẋ2 = θ̈` comes straight from the ODE above:
-In matrix form `ẋ = Ax + Bu`, `y = Cx`:
-**Worked numbers (our system):** J=0.01, b=0.1, K=0.01, R=1.0
-Matches exactly what `control.ss()` printed.
+Let x1 = theta (position), x2 = theta_dot (velocity). Then x1_dot = x2 by
+definition, and x2_dot = theta_ddot comes straight from the ODE above:
 
-**Code:** `stage1_plant/dc_servo_model.py`
+    x1_dot = x2
+    x2_dot = -[(b+K^2/R)/J]*x2 + [K/(R*J)]*V
+
+In matrix form x_dot = Ax + Bu, y = Cx:
+
+    A = [ 0                 1    ]      B = [   0    ]      C = [1  0]
+        [ 0     -(b+K^2/R)/J     ]          [ K/(R*J) ]
+
+**Worked numbers (our system):** J=0.01, b=0.1, K=0.01, R=1.0
+
+    A[1,1] = -(0.1 + 0.01^2/1.0) / 0.01 = -(0.1001)/0.01 = -10.01
+    B[1,0] = 0.01 / (1.0 * 0.01) = 1.0
+
+Matches exactly what control.ss() printed.
+
+**Code:** stage1_plant/dc_servo_model.py
 
 ---
 
-## 2. State-Space → Transfer Function
+## 2. State-Space to Transfer Function
 
 For a SISO system, the transfer function is:
-For our A, B, C, D (D=0), this works out to:
-**Why the bare `s` in the denominator matters:** a transfer function's pole
-at `s=0` means the system contains a free integrator. Physically: this is
-a position system driven by a velocity-proportional input path — apply any
-constant voltage and position grows without bound (it never "settles" to a
-value on its own). This single fact is what drove the Task 2 PID failure
-and fix below — worth being able to explain out loud.
 
-**Code:** `stage1_plant/dc_servo_model.py` (`ct.ss2tf(sys)`)
+    G(s) = C(sI - A)^-1 B + D
+
+For our A, B, C, D (D=0), this works out to:
+
+    G(s) = theta(s)/V(s) = 1 / (s^2 + 10.01s)
+
+Why the bare s in the denominator matters: a transfer function's pole at
+s=0 means the system contains a free integrator. Physically: this is a
+position system driven by a velocity-proportional input path -- apply any
+constant voltage and position grows without bound (it never "settles" to
+a value on its own). This single fact is what drove the Task 2 PID
+failure and fix below -- worth being able to explain out loud.
+
+**Code:** stage1_plant/dc_servo_model.py (ct.ss2tf(sys))
 
 ---
 
 ## 3. Why Ki Broke the Loop (System Type / Final Value Theorem)
 
 **System Type** = number of free integrators (poles at s=0) in the
-*open-loop* transfer function. Our plant is already **Type 1**.
+*open-loop* transfer function. Our plant is already Type 1.
 
-**Final Value Theorem** tells us the steady-state error to a step input for
-a Type N system with feedback gain C(s):
+**Final Value Theorem** tells us the steady-state error to a step input
+for a Type N system with feedback gain C(s):
 
-- Type 0 (no integrator anywhere): finite steady-state error — never
+- Type 0 (no integrator anywhere): finite steady-state error -- never
   reaches the target exactly.
-- Type 1 (one integrator, ours or the controller's): **zero** steady-state
+- Type 1 (one integrator, ours or the controller's): zero steady-state
   error to a step, but nonzero to a ramp.
 - Type 2 (two integrators): zero error to both step AND ramp, but now
   you've got extra phase lag, which is what caused our oscillation.
 
-**Our mistake:** plant is already Type 1 (from its own `1/s` factor). Adding
-`Ki/s` in the PID controller made the *open-loop* system Type 2. Type 2
-systems are much more prone to poor damping unless very carefully tuned —
-which is exactly the 54% overshoot, non-settling oscillation we measured.
+**Our mistake:** plant is already Type 1 (from its own 1/s factor).
+Adding Ki/s in the PID controller made the open-loop system Type 2.
+Type 2 systems are much more prone to poor damping unless very carefully
+tuned -- which is exactly the 54% overshoot, non-settling oscillation we
+measured.
 
 **The fix:** since the plant already provides Type 1 behavior, the
-controller only needs P and D — no integral term required for zero
+controller only needs P and D -- no integral term required for zero
 steady-state error on a step target.
 
-**Code:** the diagnostic pole computation in `stage1_plant/pid_baseline.py`
+**Code:** the diagnostic pole computation in stage1_plant/pid_baseline.py
 
 ---
 
 ## 4. Pole Placement Design (PD Gains)
 
-**Closed-loop characteristic equation.** For plant `G(s) = 1/(s² + as)`
-(where `a = (b+K²/R)/J = 10.01`) with PD controller `C(s) = Kp + Kd·s`,
-the closed-loop transfer function is:
-The denominator of `T(s)` — the closed-loop characteristic equation — is:
+**Closed-loop characteristic equation.** For plant G(s) = 1/(s^2 + a*s)
+(where a = (b+K^2/R)/J = 10.01) with PD controller C(s) = Kp + Kd*s, the
+closed-loop transfer function is:
+
+    T(s) = C(s)G(s) / (1 + C(s)G(s))
+
+The denominator of T(s) -- the closed-loop characteristic equation -- is:
+
+    s^2 + (a + Kd)*s + Kp = 0
+
 **Standard 2nd-order form.** Every 2nd-order system's behavior (overshoot,
 settling time, oscillation) is fully described by two numbers: damping
-ratio `ζ` and natural frequency `ωₙ`, via the standard form:
-**Choosing ζ and ωₙ** (the actual design decision, not just algebra):
-- `ζ = 0.7` is the classic "good enough" choice — near-critically-damped,
-  gives ~4.6% overshoot in theory (textbook formula below), fast without
-  ringing.
-- `ωₙ = 12 rad/s` was chosen to get sub-second settling without demanding
-  unrealistic control effort (higher ωₙ = faster response but bigger
-  voltage swings).
+ratio zeta and natural frequency omega_n, via the standard form:
+
+    s^2 + 2*zeta*omega_n*s + omega_n^2 = 0
+
+**Matching coefficients** between our equation and the standard form:
+
+    2*zeta*omega_n = a + Kd     ->     Kd = 2*zeta*omega_n - a
+    omega_n^2  = Kp             ->     Kp = omega_n^2
+
+**Choosing zeta and omega_n** (the actual design decision, not just
+algebra):
+- zeta = 0.7 is the classic "good enough" choice -- near-critically-damped,
+  gives ~4.6% overshoot in theory (formula below), fast without ringing.
+- omega_n = 12 rad/s was chosen to get sub-second settling without
+  demanding unrealistic control effort (higher omega_n = faster response
+  but bigger voltage swings).
 
 **Worked numbers:**
+
+    Kp = 12^2 = 144
+    Kd = 2*(0.7)*(12) - 10.01 = 16.8 - 10.01 = 6.79
+
 Matches exactly what we used.
 
-**Verifying via poles.** Roots of `s² + 2ζωₙs + ωₙ² = 0`:
-Matches the actual computed poles (`-8.4 ± j8.57`) exactly — confirms the
-design math and the simulation agree.
+**Verifying via poles.** Roots of s^2 + 2*zeta*omega_n*s + omega_n^2 = 0:
+
+    s = -zeta*omega_n +/- j*omega_n*sqrt(1-zeta^2)
+      = -(0.7)(12) +/- j(12)*sqrt(1-0.49)
+      = -8.4 +/- j(12)(0.7141)
+      = -8.4 +/- j8.57
+
+Matches the actual computed poles (-8.4 +/- j8.57) exactly -- confirms
+the design math and the simulation agree.
 
 **Standard 2nd-order performance formulas** (useful for quick estimates
 without simulating):
-Plug in ζ=0.7, ωₙ=12:
-Close to measured (6.06% overshoot, 0.447s) — small gap is expected since
-these formulas assume a pure 2nd-order system with no zeros; our simulation
-is the real (very slightly different) discretized system.
 
-**Code:** `stage1_plant/pid_baseline.py`
+    % Overshoot  = 100 * exp(-zeta*pi / sqrt(1-zeta^2))
+    Settling time (2% band) ~= 4 / (zeta*omega_n)
+
+Plug in zeta=0.7, omega_n=12:
+
+    Overshoot ~= 100 * exp(-0.7*pi/sqrt(0.51)) ~= 100 * exp(-3.08) ~= 4.6%
+    Settling time ~= 4/(0.7*12) ~= 0.476 s
+
+Close to measured (6.06% overshoot, 0.447s) -- small gap is expected
+since these formulas assume a pure 2nd-order system with no zeros; our
+simulation is the real (very slightly different) discretized system.
+
+**Code:** stage1_plant/pid_baseline.py
 
 ---
 
 ## 5. Feedforward Control (Model Inversion)
 
 **Core idea:** if you know the plant's dynamics exactly, you can compute
-in advance the exact input needed to produce a desired trajectory — instead
-of waiting for feedback to notice an error and react to it.
+in advance the exact input needed to produce a desired trajectory --
+instead of waiting for feedback to notice an error and react to it.
 
 **Derivation.** Start from the plant ODE:
-Solve for V given a *desired* trajectory `θ_ref(t)` (i.e., substitute the
-reference's position/velocity/acceleration in place of the plant's actual
-state):
-This is literally "solve the plant equation backwards" — given where you
+
+    J*theta_ddot + (b + K^2/R)*theta_dot = (K/R)*V
+
+Solve for V given a *desired* trajectory theta_ref(t) (i.e., substitute
+the reference's position/velocity/acceleration in place of the plant's
+actual state):
+
+    V_ff(t) = (R/K) * [J*theta_ref_ddot(t) + (b + K^2/R)*theta_ref_dot(t)]
+
+This is literally "solve the plant equation backwards" -- given where you
 want to be, what voltage produces exactly that motion (in the idealized,
 no-disturbance case).
 
-**Why it doesn't help on a step input:** for a step, `θ̇_ref = 0` and
-`θ̈_ref = 0` everywhere except the instant of the step itself (technically
-an impulse in acceleration, undefined for a real system) — so `V_ff ≈ 0`
-almost everywhere. Feedforward has nothing useful to contribute when the
-target isn't moving. This is why we tested it on a sinusoid instead — a
-genuinely moving reference.
+**Why it doesn't help on a step input:** for a step, theta_ref_dot = 0
+and theta_ref_ddot = 0 everywhere except the instant of the step itself
+(technically an impulse in acceleration, undefined for a real system) --
+so V_ff ~= 0 almost everywhere. Feedforward has nothing useful to
+contribute when the target isn't moving. This is why we tested it on a
+sinusoid instead -- a genuinely moving reference.
 
 **Why feedback is still needed even with feedforward:** feedforward is
-only as good as the model. Any mismatch between the model (J, b, K, R) and
-the real plant, or any external disturbance, isn't corrected by
-feedforward at all — that's still feedback's job. This is why the combined
-result (feedback+feedforward) beat pure feedforward-only.
+only as good as the model. Any mismatch between the model (J, b, K, R)
+and the real plant, or any external disturbance, isn't corrected by
+feedforward at all -- that's still feedback's job. This is why the
+combined result (feedback+feedforward) beat pure feedforward-only.
 
-**Code:** `stage1_plant/feedforward_comparison.py`
+**Code:** stage1_plant/feedforward_comparison.py
 
 ---
 
@@ -155,16 +227,16 @@ result (feedback+feedforward) beat pure feedforward-only.
 
 | Concept | Formula |
 |---|---|
-| DC motor simplified ODE | `J·θ̈ + (b+K²/R)·θ̇ = (K/R)·V` |
-| State-space A[1,1] | `-(b+K²/R)/J` |
-| State-space B[1,0] | `K/(R·J)` |
-| 2nd-order standard form | `s² + 2ζωₙs + ωₙ² = 0` |
-| Pole placement: Kp | `ωₙ²` |
-| Pole placement: Kd | `2ζωₙ - a` (a = plant's own damping term) |
-| Closed-loop poles | `-ζωₙ ± jωₙ√(1-ζ²)` |
-| % Overshoot (2nd order) | `100 × exp(-ζπ/√(1-ζ²))` |
-| Settling time (2% band) | `≈ 4/(ζωₙ)` |
-| Feedforward voltage | `V_ff = (R/K)[J·θ̈_ref + (b+K²/R)·θ̇_ref]` |
+| DC motor simplified ODE | J*theta_ddot + (b+K^2/R)*theta_dot = (K/R)*V |
+| State-space A[1,1] | -(b+K^2/R)/J |
+| State-space B[1,0] | K/(R*J) |
+| 2nd-order standard form | s^2 + 2*zeta*omega_n*s + omega_n^2 = 0 |
+| Pole placement: Kp | omega_n^2 |
+| Pole placement: Kd | 2*zeta*omega_n - a (a = plant's own damping term) |
+| Closed-loop poles | -zeta*omega_n +/- j*omega_n*sqrt(1-zeta^2) |
+| % Overshoot (2nd order) | 100 * exp(-zeta*pi/sqrt(1-zeta^2)) |
+| Settling time (2% band) | ~= 4/(zeta*omega_n) |
+| Feedforward voltage | V_ff = (R/K)[J*theta_ref_ddot + (b+K^2/R)*theta_ref_dot] |
 | System Type | count of poles at s=0 in open-loop G(s) |
 
 ---
@@ -172,36 +244,46 @@ result (feedback+feedforward) beat pure feedforward-only.
 ## 6. MPC Cost Function & Constraint Structure
 
 **General MPC problem, solved fresh at every timestep:**
-`N` = prediction horizon (we used 20 steps × 0.02s = 0.4s lookahead). `Q`,
-`R`, `P` are weighting matrices (in our scalar case, just numbers): `Q`
-penalizes position error, `R` (`set_rterm`) penalizes control effort.
+
+    minimize    sum_{k=0}^{N-1} [ (x_k - x_target)^T Q (x_k - x_target) + u_k^T R u_k ]
+                + (x_N - x_target)^T P (x_N - x_target)     <- terminal cost
+
+    subject to  x_{k+1} = f(x_k, u_k)      (plant dynamics, our A/B matrices)
+                u_min <= u_k <= u_max       (actuator/input constraints)
+                x_min <= x_k <= x_max       (state constraints)
+                x_0 = current measured state
+
+N = prediction horizon (we used 20 steps x 0.02s = 0.4s lookahead). Q, R,
+P are weighting matrices (in our scalar case, just numbers): Q penalizes
+position error, R (set_rterm) penalizes control effort.
 
 **Receding horizon principle:** solve the above for the *entire* horizon,
-but only apply `u_0` (the first control move). Re-measure state, re-solve
+but only apply u_0 (the first control move). Re-measure state, re-solve
 the whole problem again next timestep. This is what makes MPC naturally
-handle disturbances and model mismatch — it's constantly re-planning from
-the true current state, not committing to an open-loop plan.
+handle disturbances and model mismatch -- it's constantly re-planning
+from the true current state, not committing to an open-loop plan.
 
 **Why this structurally beats PID for state constraints:** PID computes
-`u = f(error)` — a function only of the tracking error, with zero awareness
-of any other state variable's limits. Adding "θ̇ must stay under X" to PID
-requires either (a) indirect gain re-tuning with no guarantee, or (b) an
-entirely separate outer-loop velocity limiter bolted on. MPC instead adds
-one line — `x_min ≤ θ̇ ≤ x_max` — directly into the optimization the
-controller already solves. The constraint is enforced by the solver, not
-approximated by gain tuning.
+u = f(error) -- a function only of the tracking error, with zero
+awareness of any other state variable's limits. Adding "theta_dot must
+stay under X" to PID requires either (a) indirect gain re-tuning with no
+guarantee, or (b) an entirely separate outer-loop velocity limiter bolted
+on. MPC instead adds one line -- x_min <= theta_dot <= x_max -- directly
+into the optimization the controller already solves. The constraint is
+enforced by the solver, not approximated by gain tuning.
 
-**Measured result on our plant (θ̇ limited to ±3.0 rad/s):**
-| Controller | Peak |θ̇| | Within limit? |
+**Measured result on our plant (theta_dot limited to +/-3.0 rad/s):**
+
+| Controller | Peak abs(theta_dot) | Within limit? |
 |---|---|---|
-| PD (no mechanism to enforce limit) | 5.438 rad/s | No — 81% over |
+| PD (no mechanism to enforce limit) | 5.438 rad/s | No -- 81% over |
 | MPC (limit as explicit QP constraint) | 2.883 rad/s | Yes, by construction |
 
-**Interview-ready one-liner:** "MPC's advantage isn't that it tracks faster
-than a well-tuned PID — on my plant, PD actually settled faster on the
-unconstrained case. MPC's advantage is that it can enforce state
-constraints, like a velocity limit, directly and reliably — something PID
-has no built-in mechanism to do at all."
+**Interview-ready one-liner:** "MPC's advantage isn't that it tracks
+faster than a well-tuned PID -- on my plant, PD actually settled faster
+on the unconstrained case. MPC's advantage is that it can enforce state
+constraints, like a velocity limit, directly and reliably -- something
+PID has no built-in mechanism to do at all."
 
 ---
 
@@ -296,7 +378,7 @@ optimizer to trade tracking speed for smoothness. Increasing that weight
 the cost of tracking speed -- worth trying if you want to see the tradeoff
 directly.
 
-How to reuse this pattern for any new plant/controller you tune later:
+**How to reuse this pattern for any new plant/controller you tune later:**
 
     1. Write the plant ODE from first physics (Newton's law / Kirchhoff's law).
     2. Simplify with a stated, justified assumption (we neglected inductance).
@@ -335,13 +417,13 @@ bound:
 
 so that even in the worst case within the assumed disturbance bound, the
 TRUE state stays within the original limit. This is a real, standard
-extension - worth naming explicitly if asked "how would you make this
+extension -- worth naming explicitly if asked "how would you make this
 production-safe," since claiming nominal MPC alone is safety-guaranteed
 under real disturbances would be an overclaim.
 
 **Interview-ready one-liner:** "My MPC's constraints held exactly under
 ideal conditions, but I explicitly stress-tested it with an unmodeled
-disturbance and found the guarantee degrades - about 30% over the limit
+disturbance and found the guarantee degrades -- about 30% over the limit
 versus PD's 49% over. That's expected for nominal MPC, and it's exactly
 why robust or tube MPC exists as the production-grade extension."
 
@@ -349,10 +431,10 @@ why robust or tube MPC exists as the production-grade extension."
 
 ## 8. Damping Ratio From Given Poles (Reverse Direction)
 
-Section 4 went ζ,ωₙ -> poles (design direction). The reverse -- given
-measured poles, recover ζ and ωₙ -- is exactly what was used to diagnose
-the failed Ki=40 PID attempt in Section 3, but the arithmetic was never
-shown. For a complex pole pair p = -a +/- jb:
+Section 4 went zeta,omega_n -> poles (design direction). The reverse --
+given measured poles, recover zeta and omega_n -- is exactly what was
+used to diagnose the failed Ki=40 PID attempt in Section 3, but the
+arithmetic was never shown. For a complex pole pair p = -a +/- jb:
 
     omega_n = sqrt(a^2 + b^2)          (distance from origin in s-plane)
     zeta    = a / omega_n              (fraction of that distance along
@@ -364,10 +446,12 @@ shown. For a complex pole pair p = -a +/- jb:
     omega_n = sqrt(0.8819^2 + 1.9482^2) = sqrt(0.7777 + 3.7955) = sqrt(4.5732) = 2.1385
     zeta    = 0.8819 / 2.1385 = 0.4124
 
-Matches the "zeta≈0.41" figure quoted when diagnosing that result --
+Matches the "zeta~=0.41" figure quoted when diagnosing that result --
 this is the actual arithmetic behind that number. Rule of thumb: zeta < 0.7
 means visibly underdamped/oscillatory; zeta >= 1.0 means no oscillation at
 all (overdamped or critically damped).
+
+---
 
 ## 9. Metrics & Definitions Used Throughout
 
@@ -426,6 +510,8 @@ Caution (the Task 5 lesson): this formula divides by final_value, so if
 final_value is near zero, small numerator differences produce huge,
 meaningless percentages (Task 7's N=5 case: -5137.98%). Always sanity-check
 overshoot% against the raw theta trace when final_value is small.
+
+---
 
 ## 10. Discretization Scheme (Simulation Methodology)
 
