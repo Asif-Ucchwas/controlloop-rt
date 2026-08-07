@@ -342,3 +342,56 @@ interviews, and a coherent methodology narrative for the eventual paper:
 scheduling correctness is proven in simulation; physical timing jitter
 is explicitly named as requiring real hardware (Stage 7), not
 overclaimed as already measured.
+
+## Stage 4 Task 13 — Software Watchdog with Fault Injection
+
+Implemented an independent watchdog thread (priority 3, higher than
+control_task's priority 5, so the monitor cannot be starved by whatever
+it's monitoring) that expects a "kick" from control_task every cycle. If
+no kick arrives within 2500us (checked every 2ms), it triggers a
+fallback: force control output to 0V and latch that state.
+
+**Fault injection method:** rather than simulating a genuine infinite
+loop (which would hang the whole process), deliberately withheld the
+kick for 10 consecutive control cycles - this tests the actual symptom
+the watchdog monitors (missed check-ins), which is the correct and
+standard way to unit-test a watchdog's detection path.
+
+**Test 1 (easy case) - fault injected at step 1500, after settling:**
+watchdog detected the fault in ~3.5-4ms (bounded by timeout 2500us +
+polling period 2000us, matching the theoretical worst case). Fallback
+correctly zeroed voltage. theta stayed exactly at 1.0000 with no visible
+change, since the system was already at rest (theta_dot~=0) when the
+fault hit - power cutoff had nothing to counteract.
+
+**Test 2 (hard case, more rigorous) - fault injected at step 50, mid-
+transient, while theta was still climbing under ~90-120V:** watchdog
+detected the fault in ~4ms (step 54, consistent with Test 1's latency
+bound). BUT: theta CONTINUED RISING after the power cutoff - from
+0.1579 rad at detection to a final resting value of 0.6348 rad, a coast
+of ~0.48 rad (~27 degrees) that took roughly 200-300ms to fully decay.
+
+**Critical finding: cutting power is NOT equivalent to an instant stop.**
+Root cause: theta_dot (velocity) doesn't vanish when voltage is cut -
+it only decays through the plant's own friction term, with time constant
+1/|A21| = 1/10.01 ~= 100ms (same number from Stage 1's pole analysis).
+A naive "kill power" fallback lets the system coast on inertia for
+multiple hundred-millisecond time constants before actually stopping.
+
+This is a genuine, non-obvious safety-engineering lesson (the same
+principle behind real braking-system design: de-energizing an actuator
+does not stop a moving mass) and directly motivates Task 15's design:
+a naive power-cutoff fallback can itself be unsafe if coast distance
+matters for the application (e.g. a robot joint near an obstacle).
+Task 15 will need a smarter safe-state response - likely actively
+holding the CURRENT position (re-targeting the PD loop to theta-at-
+fault-time) rather than simply cutting power to zero.
+
+**Metric introduced: coast distance under power-cut fault** = 
+|theta_final_after_coast - theta_at_fault_detection|. Measured: 0.48 rad
+for Test 2's mid-transient fault. Will add formal definition to math
+reference doc alongside jitter/RMS/chatter definitions.
+
+Kept the mid-transient (Test 2, step 50) fault injection as the
+project's canonical/default test scenario in the committed code, since
+it's the more rigorous case and produces the more important finding.

@@ -6,3 +6,5 @@ __pycache__/
 !docs/notes/**/*.png
 stage3_rtos/build/
 zephyr.exe
+stage4_safety/build/
+**/build/

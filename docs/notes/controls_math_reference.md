@@ -535,6 +535,38 @@ true; genuine jitter numbers require real hardware (Stage 7).
 
 ---
 
+## 9c. Coast Distance Under Power-Cut Fault (Stage 4, Task 13)
+
+    coast_distance = |theta_final_settled - theta_at_fault_detection|
+
+Measures how far the plant continues moving AFTER a safety fallback cuts
+power, before it fully stops. Not zero, because cutting voltage does not
+cut velocity - theta_dot only decays through the plant's own friction
+term:
+
+    theta_dot(t) ~= theta_dot(t_fault) * exp(-|A21| * (t - t_fault))
+
+with time constant 1/|A21| = 1/10.01 ~= 100ms (same A21 as Section 1).
+This means several hundred milliseconds pass before theta_dot is
+negligible, during which theta continues advancing in whatever direction
+it was already moving.
+
+**Measured on our plant:** fault injected mid-transient (theta=0.1579,
+climbing under ~90V) -> coast of 0.48 rad (~27 degrees) before settling
+at theta=0.6348, well short of the 1.0 target.
+
+**Why this matters:** a "kill power" safety fallback is not equivalent
+to an instant stop for any system with meaningful inertia. This is the
+same principle behind real braking-system design - de-energizing an
+actuator does not arrest a moving mass; only active braking or a
+sufficient coast margin does. A safe-state design that ignores this
+(assumes power-off = immediately safe) can itself be a hazard if coast
+distance matters for the application. This is the concrete justification
+for Task 15's active-hold safe-state design rather than a simple power
+cutoff.
+
+---
+
 ## 10. Discretization Scheme (Simulation Methodology)
 
 Every custom simulation loop (PD, feedforward, stress test -- NOT the
