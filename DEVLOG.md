@@ -246,3 +246,44 @@ port is behaviorally equivalent to the validated Python model, not just
 
 Reused CAN-Net's zephyr_project workspace and zephyr_venv per Task 9 -
 no duplicate SDK/module download.
+
+## Stage 3 Task 11 — Second Task, Demonstrate Preemption
+
+Added logging_task (priority 7, lower priority than control_task's
+priority 5 - lower number = higher priority in Zephyr) doing ~2ms of
+simulated busy-work per cycle, deliberately longer than control_task's
+1ms period, specifically to test whether preemption actually holds under
+real competition.
+
+**Bug found on first run - full hang, no output after both tasks'
+startup messages.** Root cause: logging_task used a manual busy-wait
+loop checking k_uptime_get() against a target duration. native_sim's
+simulated clock only advances on kernel scheduling events - a tight loop
+making no kernel calls never yields, so simulated time never moved, and
+the loop spun forever in zero simulated time, starving control_task
+entirely. This is the EXACT gotcha already documented in CAN-Net's
+DEVLOG/memory ("native_sim's virtual clock only advances on kernel
+scheduling events, busy-waits must use k_busy_wait() not manual
+k_uptime_get() spin loops") - reused the Zephyr infrastructure per Task
+9, but the specific lesson didn't automatically carry into new code.
+Worth the reminder: documented gotchas need to be actively re-applied,
+not just recorded once. Fixed by replacing the manual loop with
+k_busy_wait(2000) - the correct primitive, which properly advances
+simulated time while still allowing async interrupts to be delivered.
+
+**Result after fix:** control_task's period measured EXACTLY 1000us
+(min=max=avg=1000us) across all 2999 cycles, despite logging_task
+genuinely competing with 2ms of busy-work every cycle. Confirms real,
+correct priority-based preemption: the timer ISR fires every 1ms, wakes
+control_task via k_sem_give(), and the scheduler preempts logging_task
+immediately on ISR return - even mid-busy-wait - because k_busy_wait()
+does not disable interrupts, only avoids voluntary yielding.
+
+**Honest caveat (same as Task 10, worth restating not dropping):** the
+zero measured variance is native_sim's idealized deterministic clock
+proving the SCHEDULER's logical correctness (priorities are honored
+exactly as designed) - it is not evidence that real hardware would show
+zero jitter under equivalent load. Real interrupt latency, cache
+effects, and bus contention would introduce measurable variance even
+with functionally correct preemption. This distinction is important for
+the paper's Methodology/Limitations section, same framing as Task 10.
