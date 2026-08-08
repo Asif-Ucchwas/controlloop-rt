@@ -597,3 +597,66 @@ three run correctly with the corrected trajectory:
   PID: rms=0.193  max=0.277  settling=0.0    chatter=0.065
   FF:  rms=0.078  max=0.143  settling=0.272  chatter=0.054
   MPC: rms=0.070  max=0.269  settling=1.099  chatter=0.270
+
+## Stage 5 Task 19 — Full 600-Trial Benchmark Suite
+
+Ran all 3 controllers x 4 conditions x 50 trials (600 total, common
+random seeds 0-49 shared across controllers per condition for a paired
+comparison) in 948s (15.8 min). Raw: benchmark_results.csv. Aggregated:
+benchmark_summary.csv.
+
+**Finding 1 - disturbance fragility is very different per controller:**
+| Controller | Max error: no-dist -> dist | Relative increase |
+|---|---|---|
+| PID | 0.277 -> 0.374 | +35% |
+| FF  | 0.143 -> 0.481 | +236% |
+| MPC | 0.269 -> 0.304 | +13% |
+
+Feedforward has the BEST baseline performance but is dramatically the
+MOST fragile under disturbance - consistent with Stage 1 Task 3's
+already-documented limitation (feedforward has zero adaptive correction
+for unmodeled disturbances, since it only knows the ideal trajectory).
+MPC shows the smallest relative degradation, consistent with the
+receding-horizon re-planning story (math doc Section 6).
+
+**Finding 2 - PID and FF chatter are nearly identical under noise, with
+a precise mathematical explanation:** under no_dist_noise, PID
+chatter=167.6707, FF chatter=167.6707 - essentially indistinguishable.
+Both use the identical noisy-derivative feedback term; feedforward's
+added term is a smooth, deterministic function of the ideal reference
+only (never touches sensor noise), so it doesn't materially change
+step-to-step control variability, which is entirely dominated by the
+noisy feedback derivative. Precise finding: feedforward neither helps
+nor hurts chatter under sensor noise.
+
+**Finding 3 - MPC's velocity constraint violated in 100% of disturbance
+trials, a stronger confirmation of Stage 2 Task 8's single-trial
+finding:** constraint_violation_rate_pct = 100.0 for BOTH dist_no_noise
+and dist_noise (100/100 trials). Not occasional - deterministic
+consequence of the same unmodeled-disturbance mechanism (math doc
+Section 7, nominal MPC's guarantee only holds relative to its internal
+model). Critically, violation rate = 0.0 for BOTH no-disturbance
+conditions (0/100 trials) - confirms Task 18's trajectory amplitude fix
+worked correctly: MPC respects its constraint under normal operation,
+violating it only when a genuine unmodeled disturbance hits.
+
+**Finding 4 - MPC is less trial-to-trial CONSISTENT under combined
+stress, despite good average performance:** rms_error_std in dist_noise:
+PID/FF ~0.00014, MPC 0.00657 - roughly 47x higher variability. MPC's
+mean tracking is still competitive, but it is measurably less
+predictable trial-to-trial under combined disturbance+noise than the
+classical controllers - a reliability nuance worth reporting alongside
+the mean, not obscured by it.
+
+**Finding 5 - zero settling failures:** never_settled_pct=0.0 across
+all 12 (controller x condition) rows, all 600 trials. Every controller
+converged within the 5-second window in every single trial - a genuine,
+stated robustness confirmation.
+
+**Overall conclusion for the paper - no controller wins outright:**
+PID is mediocre but stable/predictable; feedforward is excellent
+normally but fragile under disturbance; MPC is robust to disturbance
+shocks (smallest relative max-error increase) but structurally slower
+to settle (50Hz vs 1kHz loop rate) and less trial-to-trial consistent
+under combined stress. This multi-dimensional tradeoff, not a single
+"best" controller, is the honest and complete finding across 600 trials.
