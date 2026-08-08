@@ -50,7 +50,7 @@
     constraint; the only lever is indirect gain re-tuning).
   - MPC peak |θ̇|: 2.883 rad/s — respected the limit by construction, since
     it's an explicit bound in the QP, not an emergent property of gains.
-- Conclusion for the paper/interview narrative: MPC's advantage over
+- Conclusion for the paper: MPC's advantage over
   classical control isn't raw unconstrained tracking speed (PD wins there)
   — it's the ability to enforce state constraints directly and reliably,
   something PID/PD has no mechanism to do at all. This is a more precise
@@ -156,7 +156,7 @@ on this plant: 115V/step chatter would be genuinely damaging or trip
 overcurrent protection on a real motor driver; 8V/step is a reasonable,
 usable control signal.
 
-## Stage 2 Complete - Summary for Paper/Interview Narrative
+## Stage 2 Complete - Findings Summary
 
 Four honest findings across Tasks 5-8, none of which is a simple "MPC wins":
 1. Unconstrained tracking: PD wins (Task 5) - MPC's overhead buys nothing
@@ -174,7 +174,7 @@ it's (a) explicit state constraint handling under nominal conditions, and
 (b) dramatically better control-effort smoothness under sensor noise.
 Both are real, measured, and honestly scoped, including where MPC's
 guarantees break down (unmodeled disturbances) - a more credible and
-interview-defensible story than an uncomplicated "MPC beats PID" claim.
+well-supported story than an uncomplicated "MPC beats PID" claim.
 
 ## Stage 3 Task 9 — Reuse CAN-Net Zephyr/QEMU Infrastructure
 
@@ -337,8 +337,8 @@ that native_sim's zero-jitter result is a real property of the
 simulation model, not measurement blindness (Task 12).
 
 Four real bugs found and fixed across this stage, each documented with
-root cause rather than just "fixed it" - genuine debugging material for
-interviews, and a coherent methodology narrative for the eventual paper:
+root cause rather than just "fixed it" - a genuinely useful debugging
+record, and a coherent methodology narrative for the eventual paper:
 scheduling correctness is proven in simulation; physical timing jitter
 is explicitly named as requiring real hardware (Stage 7), not
 overclaimed as already measured.
@@ -523,9 +523,9 @@ closes the stage by mapping all of it to ISO 26262's actual structure,
 with real measured evidence in the traceability table rather than
 placeholder claims.
 
-Bundle 4's "Functional safety (ISO 26262, watchdogs, redundancy)" skill
-gap is now genuinely closed - not just a resume line, but backed by
-fault-injection test data across three distinct mechanisms.
+Functional safety (watchdog, sensor redundancy, safe-state transitions)
+is now genuinely and rigorously validated - not just implemented, but
+backed by fault-injection test data across three distinct mechanisms.
 
 ## Stage 5 Task 17 — Benchmark Test Protocol Design
 
@@ -713,5 +713,4 @@ distinct, non-oversimplified findings:
 
 No controller "wins" outright - the honest conclusion across 600 real
 trials is a genuine multi-dimensional tradeoff, which is the strongest
-and most defensible story for both the interview narrative and the
-eventual paper's Results section.
+and most defensible finding for the eventual paper's Results section.

@@ -2,7 +2,7 @@
 
 **Scope and disclaimer:** this document maps ControlLoop-RT's implemented
 mechanisms (Tasks 13-15) to ISO 26262 concepts and vocabulary, for
-interview and portfolio purposes. It is a conceptual/illustrative
+documentation purposes. It is a conceptual/illustrative
 mapping, NOT a certified safety case. Real ISO 26262 compliance requires
 an independent safety assessment, a qualified toolchain, MISRA C static
 analysis, formal requirements traceability (e.g. DOORS), and a dedicated
@@ -151,7 +151,7 @@ ISO 26262 program for this system would additionally require:
   Task 12) cannot itself serve as timing certification evidence
 - A dedicated, resourced safety review process, not a solo repository
 
-**Framing for interviews:** "I built and tested real fault-detection and
+**Summary:** "I built and tested real fault-detection and
 safe-state mechanisms with quantified evidence for each, and I can map
 that work to ISO 26262's structure and vocabulary - but I'm not claiming
 certification. I know specifically what a real safety program adds on

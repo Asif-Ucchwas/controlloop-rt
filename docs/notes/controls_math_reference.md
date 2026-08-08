@@ -1,4 +1,4 @@
-# Controls Math Reference — Interview Prep
+# Controls Math Reference
 
 Formula -> derivation -> where it's implemented. Extended as each stage
 adds new math (RTOS jitter statistics, functional safety math, etc.).
@@ -279,7 +279,7 @@ enforced by the solver, not approximated by gain tuning.
 | PD (no mechanism to enforce limit) | 5.438 rad/s | No -- 81% over |
 | MPC (limit as explicit QP constraint) | 2.883 rad/s | Yes, by construction |
 
-**Interview-ready one-liner:** "MPC's advantage isn't that it tracks
+**Key takeaway:** "MPC's advantage isn't that it tracks
 faster than a well-tuned PID -- on my plant, PD actually settled faster
 on the unconstrained case. MPC's advantage is that it can enforce state
 constraints, like a velocity limit, directly and reliably -- something
@@ -421,7 +421,7 @@ extension -- worth naming explicitly if asked "how would you make this
 production-safe," since claiming nominal MPC alone is safety-guaranteed
 under real disturbances would be an overclaim.
 
-**Interview-ready one-liner:** "My MPC's constraints held exactly under
+**Key takeaway:** "My MPC's constraints held exactly under
 ideal conditions, but I explicitly stress-tested it with an unmodeled
 disturbance and found the guarantee degrades -- about 30% over the limit
 versus PD's 49% over. That's expected for nominal MPC, and it's exactly
