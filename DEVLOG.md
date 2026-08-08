@@ -442,3 +442,49 @@ detection mechanisms (Task 13's watchdog for scheduling/liveness faults,
 Task 14's voting for sensor-data faults) coexisting and triggering the
 same underlying safety infrastructure (control_output_enabled flag) -
 a modular safety-layer design, not a single monolithic fault check.
+
+## Stage 4 Task 15 — Active-Hold Safe-State Transition
+
+Direct fix for Task 13's coast-distance finding. Architectural change:
+control output is NEVER forced to zero anymore. Instead, on fault
+detection, the existing PD controller is re-targeted from TARGET to
+theta_hold_target (captured once, at the exact moment of fault
+detection) - actively braking and holding position using the same
+control law, rather than passively coasting on inertia.
+
+Tested with the identical hard-case scenario as Task 13 (watchdog fault
+injected mid-transient at step 50, theta still climbing under ~90-105V)
+for a direct, apples-to-apples comparison.
+
+**Result - more nuanced than a flat "zero coast" claim:**
+- Fault detected at step 54, hold engaged at theta_voted=0.1531
+  (true_theta=0.1529).
+- PEAK TRANSIENT OVERSHOOT: ~0.16 rad (true_theta reached ~0.3105 around
+  step 100-105) before the active controller pulled it back. This is
+  real, unavoidable physics - residual velocity at the moment of fault
+  detection cannot be instantaneously erased by any controller. Active-
+  hold does not eliminate the initial excursion.
+- FINAL COAST DISTANCE: 0.0000 rad. Unlike the transient peak, the
+  active controller CORRECTED the overshoot and returned exactly to the
+  fault-time position (0.1529), holding there precisely through the
+  remaining ~2.9 seconds of the run.
+
+**Direct comparison to Task 13's naive power-cutoff (same fault
+scenario):** naive cutoff produced a final coast distance of 0.48 rad,
+settling at an uncontrolled final position (0.6348) determined entirely
+by however far inertia+friction happened to carry it - with zero
+correction ever applied. Active-hold produces a transient excursion
+(~0.16 rad, physically unavoidable) FOLLOWED BY a controlled return to
+the exact fault-time position (0.0 rad final error).
+
+**The precise engineering distinction, worth stating exactly this way
+in the paper:** naive power-cutoff yields an uncontrolled final resting
+point; active-hold yields a bounded transient excursion followed by a
+controlled, precise return to a known position. For any application
+where final resting position matters (e.g. a robot joint that must not
+drift into a specific zone), this is a materially safer guarantee than
+"eventually stops somewhere."
+
+Verified sensor disagreements=0/3000 this run, confirming Task 14's
+sensor fault was correctly isolated/disabled, cleanly testing only the
+watchdog-triggered active-hold mechanism in this scenario.
