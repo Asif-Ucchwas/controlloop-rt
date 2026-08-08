@@ -395,3 +395,50 @@ reference doc alongside jitter/RMS/chatter definitions.
 Kept the mid-transient (Test 2, step 50) fault injection as the
 project's canonical/default test scenario in the committed code, since
 it's the more rigorous case and produces the more important finding.
+
+## Stage 4 Task 14 — Dual-Sensor Redundancy & Voting
+
+Significant realism upgrade: control_task no longer reads ground-truth
+theta directly (as it had in every prior task) - it now goes through two
+independent simulated sensor channels (each with small Gaussian-like
+noise, amplitude 0.005 rad, via a simple LCG-based pseudo-random
+generator) and a voting layer. This is a meaningfully more realistic
+architecture than Stages 1-3's "perfect state knowledge" assumption.
+
+**Voting logic:** if |sensor_A - sensor_B| < 0.05 rad, trust their
+average. If they disagree beyond that, fall back to sensor A (designated
+primary) and flag a disagreement - not an immediate shutdown; Task 15
+will build the fuller escalation logic on top of this.
+
+**Fault injection:** biased sensor B by +0.5 rad for 200 cycles
+(steps 800-999), simulating a stuck/miscalibrated encoder, while sensor A
+continued reading correctly.
+
+**Result: voting logic performed perfectly.**
+- disagreement_count = 200/3000, exactly matching the injected fault
+  duration - zero missed detections, zero false positives.
+- Quantified the cost of NOT voting: naive_avg_would_be sat at ~1.245-
+  1.253 throughout the fault (vs. true_theta ~0.998-1.000) - a
+  persistent, sustained ~0.25 rad (~14 degree) FALSE reading that a
+  naive averaging approach would have fed into the control law for the
+  entire 200ms fault window.
+- Most important result: true_theta stayed essentially flat (0.998-
+  1.000) throughout the fault window. The voting logic didn't just
+  detect the bad sensor - it fully protected the physical plant from any
+  disturbance, because the corrupted channel was correctly excluded
+  before ever reaching the control law.
+
+**Benign artifact, not a bug:** a watchdog fault fired AFTER
+"[CONTROL] DONE." at the very end of the run. This happens because
+control_task's while loop legitimately exits at step 3000, the thread
+function returns, and kicks simply stop - which the watchdog correctly
+cannot distinguish from a real hang (and shouldn't be able to: in a real
+embedded system, control_task should never return at all, so any
+cessation of kicks legitimately indicates a fault). Documented as
+expected test-harness behavior.
+
+**Architectural note:** this task demonstrates two independent fault-
+detection mechanisms (Task 13's watchdog for scheduling/liveness faults,
+Task 14's voting for sensor-data faults) coexisting and triggering the
+same underlying safety infrastructure (control_output_enabled flag) -
+a modular safety-layer design, not a single monolithic fault check.
