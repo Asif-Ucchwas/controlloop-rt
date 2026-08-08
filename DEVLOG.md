@@ -488,3 +488,41 @@ drift into a specific zone), this is a materially safer guarantee than
 Verified sensor disagreements=0/3000 this run, confirming Task 14's
 sensor fault was correctly isolated/disabled, cleanly testing only the
 watchdog-triggered active-hold mechanism in this scenario.
+
+## Stage 4 Task 16 — ISO 26262 Functional Safety Mapping
+
+Documented (not certified) mapping of Tasks 13-15's mechanisms to ISO
+26262 structure and vocabulary: item definition, a lite hazard analysis
+(3 hazards, illustrative S/E/C ratings -> illustrative ASIL B), 3 safety
+goals, and a full traceability table connecting each safety goal to its
+implementing mechanism, task, and actual measured verification evidence
+(not hypothetical - real numbers from Tasks 13-15's test runs).
+
+Explicitly documented what real certification would additionally require
+(independent assessment, MISRA C, qualified toolchain, DOORS-style
+traceability, FMEA/FMEDA with real component data, hardware verification)
+- same "documented, not certified" honesty convention used throughout
+this project and across the portfolio (e.g. TelemOps's Terraform "path
+to production" section).
+
+Full document: docs/notes/iso26262_functional_safety_mapping.md
+
+## Stage 4 Complete (Tasks 13-16)
+
+Summary: implemented and rigorously tested three independent safety
+mechanisms - watchdog fault detection (Task 13), dual-sensor voting
+(Task 14), and active-hold safe-state transition (Task 15) - each with
+genuine fault injection, not just code review. The standout finding
+across the stage: Task 13's naive power-cutoff produced a 0.48 rad
+uncontrolled coast; Task 15's active-hold redesign, tested on the
+identical fault scenario, reduced this to 0.0000 rad final coast
+distance (with an honest, unavoidable ~0.16 rad transient overshoot en
+route). This progression - find a real gap, then design and prove a fix
+- is the strongest engineering narrative in the project so far. Task 16
+closes the stage by mapping all of it to ISO 26262's actual structure,
+with real measured evidence in the traceability table rather than
+placeholder claims.
+
+Bundle 4's "Functional safety (ISO 26262, watchdogs, redundancy)" skill
+gap is now genuinely closed - not just a resume line, but backed by
+fault-injection test data across three distinct mechanisms.
