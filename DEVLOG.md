@@ -552,3 +552,48 @@ code, same discipline as CAN-Net's Stage 5 protocol. Key decisions:
   its own dedicated fault-injection evidence).
 
 Full protocol: stage5_benchmarking/TEST_PROTOCOL.md
+
+## Stage 5 Task 18 — Instrumentation, Metric Redefinition & Two Real Bugs Caught
+
+Built stage5_benchmarking/run_benchmark.py implementing a single-trial
+runner for PID, feedforward, and MPC, plus formal metric definitions
+(TEST_PROTOCOL.md addendum): tracking error/control effort reused
+directly from Section 9's existing definitions; settling time REDEFINED
+for a sinusoidal reference (no single fixed target to settle at - new
+definition based on decay into steady-state RMS band); watchdog/jitter
+explicitly scoped as PD-only Zephyr data (Stage 3-4), not fabricated for
+FF/MPC which were never RTOS-ported.
+
+**Bug 1 (code error, not user error):** initial MPC setup called
+model.setup() before declaring the time-varying reference parameter
+(_tvp), which do-mpc requires be declared before setup locks the model.
+Fixed by reordering variable declarations.
+
+**Bug 2 (real design flaw, caught via smoke test before the full 600-run
+suite):** original reference trajectory (amplitude=1.0 rad, 0.5Hz)
+required peak velocity pi~=3.14 rad/s, EXCEEDING MPC's own velocity
+constraint (3.0 rad/s, reused from Stage 2). This made the trajectory
+infeasible for MPC while imposing no limit on PID/FF - undermining the
+protocol's "identical test conditions" goal, and producing a
+deterministic (not statistically meaningful) bias that would have
+appeared identically across all 50 MPC trials per condition. Fixed by
+reducing amplitude to 0.75 rad (21% velocity margin under MPC's
+constraint), keeping frequency unchanged at Stage 1/2's validated 0.5Hz.
+
+**Remaining honest limitation (documented, not fixed):** even with
+adequate constraint margin, MPC still shows worse max_error/settling
+than FF. Root cause: MPC runs at 50Hz (matching Stage 2 Task 7's real
+solve-time constraint), PID/FF run at 1kHz - a 20x coarser control rate
+inherently produces larger transient error on a moving reference,
+independent of algorithm quality. This is NOT equalizable (Stage 2
+already proved MPC can't run faster without missing its deadline) -
+documented as an inherent difference in HOW each controller operates,
+to be reported explicitly alongside the Task 20 results so "MPC: best
+RMS, worst settling" reads as an explained tradeoff, not a
+contradiction.
+
+Smoke test (1 trial/controller, no disturbance/noise) confirmed all
+three run correctly with the corrected trajectory:
+  PID: rms=0.193  max=0.277  settling=0.0    chatter=0.065
+  FF:  rms=0.078  max=0.143  settling=0.272  chatter=0.054
+  MPC: rms=0.070  max=0.269  settling=1.099  chatter=0.270
