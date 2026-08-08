@@ -526,3 +526,29 @@ placeholder claims.
 Bundle 4's "Functional safety (ISO 26262, watchdogs, redundancy)" skill
 gap is now genuinely closed - not just a resume line, but backed by
 fault-injection test data across three distinct mechanisms.
+
+## Stage 5 Task 17 — Benchmark Test Protocol Design
+
+Documented the full benchmark protocol before writing any benchmark
+code, same discipline as CAN-Net's Stage 5 protocol. Key decisions:
+
+- Sinusoidal reference (not step) chosen deliberately - a step input
+  gives feedforward zero opportunity to help (Stage 1 Task 3 finding),
+  which would make a step-only comparison structurally unfair to two of
+  the three controllers under test.
+- All three controllers (PID/PD, PD+FF, MPC) reuse EXACT parameters
+  already validated in Stages 1-2 - no re-tuning for this benchmark, so
+  results reflect the controllers as actually built, not a re-optimized
+  version cherry-picked to look better.
+- 2x2 condition grid (disturbance x noise) reusing Stage 2 Task 8's
+  exact disturbance/noise models, x 50 trials each (mirroring the
+  thesis's 50-trial rigor) x 3 controllers = 600 total simulation runs.
+- Trial-to-trial randomization isolated to sensor-noise seed only -
+  disturbance stays fixed within a condition, cleanly separating the two
+  randomness sources rather than conflating them into one number.
+- Explicitly scoped OUT Stage 3/4's RTOS/safety mechanisms - this
+  benchmark is a controller-performance comparison in the Stage 1/2
+  Python environment, not a full-system RTOS re-test (which already has
+  its own dedicated fault-injection evidence).
+
+Full protocol: stage5_benchmarking/TEST_PROTOCOL.md
