@@ -2,75 +2,127 @@
 
 **Model-Predictive Control, Feedforward & Real-Time Safety-Critical Systems**
 
-Md Asifuzzaman
+![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python&logoColor=white)
+![Zephyr RTOS](https://img.shields.io/badge/RTOS-Zephyr-purple?logo=zephyrproject&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
+![Trials](https://img.shields.io/badge/Benchmark-600%20trials-orange)
+![Status](https://img.shields.io/badge/Status-Active-brightgreen)
 
-A from-scratch controls engineering system spanning classical feedback
-control, feedforward, constrained MPC, real-time RTOS integration, and
-functional-safety mechanisms — all validated on the same simulated DC
-servo plant, with every claim backed by measured data, not assertion.
+A controls engineering system built from first principles: classical
+feedback control, feedforward, constrained MPC, a real-time embedded
+port, and functional-safety mechanisms — validated end-to-end on the
+same simulated DC servo plant, with every claim backed by measured data.
 
 ---
 
-## What This Project Demonstrates
+## Contents
 
-    - Classical control:      PID -> diagnosed failure -> PD via pole placement
-    - Feedforward control:    87.4% RMS tracking error reduction (moving reference)
-    - Model Predictive Control: constrained QP, receding horizon, do-mpc/CasADi
-    - Real-time embedded:     ported into a genuine 1kHz Zephyr RTOS task
-    - Functional safety:      watchdog, dual-sensor voting, active-hold safe-state
-    - Rigorous benchmarking:  600 trials (3 controllers x 4 conditions x 50 trials)
-    - ISO 26262 mapping:      documented (not certified) hazard analysis & traceability
+- [What This Demonstrates](#what-this-demonstrates)
+- [Architecture](#architecture)
+- [Key Results](#key-results)
+- [Repository Structure](#repository-structure)
+- [Getting Started](#getting-started)
+- [Documentation](#documentation)
+- [Path to Production](#path-to-production)
+- [License](#license)
 
-**Every stage in this project found and fixed at least one real bug or
-design flaw during development, not just at the end** — see DEVLOG.md
-for the full, honest debugging history.
+---
+
+## What This Demonstrates
+
+| Area | What Was Built | Headline Result |
+|---|---|---|
+| Classical control | PID → diagnosed instability → PD via pole placement | 6.06% overshoot, 0.447s settling, zero steady-state error |
+| Feedforward | Model-inversion feedforward on top of PD | 87.4% RMS tracking error reduction on a moving reference |
+| Model Predictive Control | Constrained QP, receding horizon (do-mpc/CasADi) | 14× lower control chatter than PD under sensor noise |
+| Real-time embedded | Ported into a genuine Zephyr RTOS task | Proven real preemption; zero jitter under stress test |
+| Functional safety | Watchdog, dual-sensor voting, active-hold safe-state | Reduced uncontrolled coast distance from 0.48 rad → 0.0000 rad |
+| Rigorous benchmarking | 600 trials: 3 controllers × 4 conditions × 50 trials | No single controller wins — a real, quantified tradeoff |
+
+Every stage found and fixed at least one genuine bug or design flaw
+during development — see [DEVLOG.md](DEVLOG.md) for the full, honest
+debugging history, not a cleaned-up highlight reel.
 
 ---
 
 ## Architecture
 
-    Stage 1: Plant Model & Baseline
-      DC Servo Motor (2nd-order ODE) --> State-Space --> PD Controller
-                                                       --> Feedforward (model inversion)
+    ┌─────────────────────────────────────────────────────────────┐
+    │  Stage 1 — Plant & Baseline                                  │
+    │  DC Servo (2nd-order ODE) → State-Space → PD → Feedforward   │
+    └───────────────────────────┬───────────────────────────────────┘
+                                 │
+    ┌───────────────────────────▼───────────────────────────────────┐
+    │  Stage 2 — Model Predictive Control                          │
+    │  do-mpc/CasADi QP (N=20, 50Hz) → constraints → stress-tested  │
+    └───────────────────────────┬───────────────────────────────────┘
+                                 │
+    ┌───────────────────────────▼───────────────────────────────────┐
+    │  Stage 3 — Real-Time Integration (Zephyr RTOS)                │
+    │  1kHz periodic task → preemption proven → zero-jitter proven  │
+    └───────────────────────────┬───────────────────────────────────┘
+                                 │
+    ┌───────────────────────────▼───────────────────────────────────┐
+    │  Stage 4 — Functional Safety                                 │
+    │  Watchdog → Sensor Voting → Active-Hold → ISO 26262 mapping   │
+    └───────────────────────────┬───────────────────────────────────┘
+                                 │
+    ┌───────────────────────────▼───────────────────────────────────┐
+    │  Stage 5 — Benchmarking                                       │
+    │  600 trials → RMS/max error, chatter, settling, constraints   │
+    └─────────────────────────────────────────────────────────────┘
 
-    Stage 2: Model Predictive Control
-      Same Plant --> do-mpc/CasADi QP Solver (N=20, 50Hz)
-                  --> Hard constraints (actuator, velocity)
-                  --> Stress-tested under sensor noise + disturbance
+---
 
-    Stage 3: Real-Time Integration (Zephyr RTOS, native_sim)
-      PD Control Loop --> k_timer (1kHz) --> k_sem --> Periodic Task
-                       --> Competing lower-priority task --> Preemption proven
-                       --> Cycle-resolution jitter measurement (zero jitter, stress-tested)
+## Key Results
 
-    Stage 4: Functional Safety
-      Watchdog Thread (priority 3) --> monitors --> Control Task (priority 5)
-      Dual Sensor Channels --> Voting Logic --> Control Task (never reads raw sensors)
-      Fault Detected --> Active-Hold Safe-State (not power cutoff)
-      --> Mapped to ISO 26262 (HARA, safety goals, traceability)
+### Tracking Error Across Controllers and Conditions
 
-    Stage 5: Benchmarking
-      PID / PD+Feedforward / MPC --> 4 conditions x 50 trials each
-                                  --> RMS/max error, chatter, settling time, constraint violations
-                                  --> 600 total simulation runs, statistically aggregated
+![RMS Tracking Error Comparison](assets/rms_error_comparison.png)
+
+MPC has the best average tracking; PD+Feedforward is close behind under
+normal conditions. See below for why this isn't the whole story.
+
+### Feedforward's Hidden Fragility
+
+![Max Tracking Error Comparison](assets/max_error_comparison.png)
+
+Feedforward has the *best baseline* performance but is by far the *most
+fragile* under an unmodeled disturbance (+236% peak error vs. PID's
++35% and MPC's +13%) — because feedforward has no adaptive mechanism to
+correct for anything it doesn't already know about.
+
+### MPC's Constraint Guarantee Is Conditional
+
+![MPC Constraint Violation Rate](assets/mpc_constraint_violation.png)
+
+MPC's velocity constraint holds perfectly (0% violated) under normal
+operation — but breaks down deterministically (100% violated) the
+moment a real, unmodeled disturbance hits. This is a textbook property
+of *nominal* MPC, not a bug — see [the math reference doc](docs/notes/controls_math_reference.md)
+for the full explanation and what "robust MPC" would add.
+
+**Full results table:** [stage5_benchmarking/RESULTS_TABLE.md](stage5_benchmarking/RESULTS_TABLE.md)
 
 ---
 
 ## Repository Structure
 
-    stage1_plant/           Plant model, PD baseline, feedforward (Python)
-    stage2_mpc/              MPC formulation, constraints, horizon tuning, stress tests (Python)
-    stage3_rtos/             Real-time Zephyr port: periodic task, preemption, jitter (C)
-    stage4_safety/           Watchdog, sensor voting, active-hold safe-state (C)
-    stage5_benchmarking/     Test protocol, 600-trial runner, plots, results table (Python)
-    docs/notes/               Math reference doc, ISO 26262 mapping, plant derivation
-    assets/                   Benchmark comparison plots (README-embedded)
-    DEVLOG.md                 Full running development log — every bug, every fix, honestly
-    requirements.txt           Python dependencies (Stages 1, 2, 5)
+| Path | Contents | Language |
+|---|---|---|
+| `stage1_plant/` | Plant model, PD baseline, feedforward | Python |
+| `stage2_mpc/` | MPC formulation, constraints, horizon tuning, stress tests | Python |
+| `stage3_rtos/` | Real-time Zephyr port: periodic task, preemption, jitter | C |
+| `stage4_safety/` | Watchdog, sensor voting, active-hold safe-state | C |
+| `stage5_benchmarking/` | Test protocol, 600-trial runner, plots, results table | Python |
+| `docs/notes/` | Math reference, ISO 26262 mapping, plant derivation | Markdown |
+| `assets/` | Benchmark comparison plots (embedded above) | — |
+| `DEVLOG.md` | Full running development log — every bug, every fix | Markdown |
+| `requirements.txt` | Python dependencies (Stages 1, 2, 5) | — |
 
 ---
 
-## Setup
+## Getting Started
 
 ### Python environment (Stages 1, 2, 5)
 
@@ -78,109 +130,54 @@ for the full, honest debugging history.
     source venv/bin/activate
     pip install -r requirements.txt
 
-Run any stage's scripts directly, e.g.:
-
     python3 stage1_plant/dc_servo_model.py
     python3 stage5_benchmarking/run_full_suite.py   # full 600-trial suite, ~16 min
 
 ### Zephyr RTOS environment (Stages 3, 4)
 
-Requires a working Zephyr SDK + west workspace (this project reused an
-existing CAN-Net Zephyr workspace rather than duplicating a ~1GB+
-download — see DEVLOG.md Stage 3 Task 9 for the exact west build -s/-d
-pattern for building an out-of-tree app against a shared workspace).
+Requires a working Zephyr SDK + west workspace. See
+[DEVLOG.md, Stage 3 Task 9](DEVLOG.md) for the exact `west build -s/-d`
+pattern used to build an out-of-tree app against a shared workspace.
 
     west build -s stage3_rtos/control_loop_rt -d stage3_rtos/build -b native_sim --pristine
     ./stage3_rtos/build/zephyr/zephyr.exe
 
 ---
 
-## Key Results
-
-### Feedforward (Stage 1)
-87.4% RMS tracking error reduction over feedback-only, on a moving
-sinusoidal reference. No benefit on step inputs (the plant's built-in
-integrator already zeroes step error) — feedforward's value is
-trajectory-tracking specific, and this is stated explicitly rather than
-overclaimed.
-
-### MPC vs. Classical Control (Stage 2)
-MPC does NOT win on raw unconstrained tracking speed — PD settles
-faster (0.447s vs 0.94s) on an unconstrained step. MPC's real advantage:
-explicit state-constraint enforcement (PD violated a 3.0 rad/s velocity
-limit by 81%; MPC respected it by construction) and dramatically lower
-control-effort chatter under sensor noise (14x lower than PD).
-
-### Real-Time Validation (Stage 3)
-Ported into an actual 1kHz Zephyr task. Found and fixed a derivative-
-kick bug and a silent tick-rate mismatch (requested 1ms, native_sim
-silently rounded to 10ms). Stress-tested jitter at 1us resolution under
-adversarial competing load: genuinely zero jitter — a property of
-native_sim's idealized simulation model, proven by actively trying to
-break it, not assumed.
-
-### Functional Safety (Stage 4)
-Naive power-cutoff on fault detection let the shaft coast 0.48 rad
-uncontrolled. Redesigned as active-hold (re-target the existing PD
-controller to the fault-time position): reduced final coast distance to
-0.0000 rad (with an honest, physically unavoidable ~0.16 rad transient
-overshoot en route). Dual-sensor voting caught 200/200 injected sensor
-faults with zero false positives, fully protecting the plant from any
-physical disturbance during the fault.
-
-### Benchmark Results (Stage 5, 600 trials)
-No controller wins outright — the honest, multi-dimensional finding:
-- **Feedforward**: best baseline tracking, but by far the most fragile
-  under disturbance (+236% max error vs. PID's +35%, MPC's +13%)
-- **MPC**: best average tracking, most robust to disturbance shocks, but
-  structurally slower to settle (50Hz vs. 1kHz loop rate) and less
-  trial-to-trial consistent under combined stress
-- **PID**: mediocre but the most predictable and stable across conditions
-
-Full results: stage5_benchmarking/RESULTS_TABLE.md and assets/*.png
-
----
-
 ## Documentation
 
-    docs/notes/controls_math_reference.md       Every formula used, derived, with worked
-                                                   numeric examples using this project's real
-                                                   numbers
-    docs/notes/plant_model_and_baseline.md       Stage 1 plant derivation & baseline results
-    docs/notes/iso26262_functional_safety_mapping.md
-                                                   Documented (not certified) ISO 26262 mapping:
-                                                   HARA, safety goals, full traceability table
-    DEVLOG.md                                     Complete development history — every bug found,
-                                                   diagnosed, and fixed, with root causes
+| Document | What's Inside |
+|---|---|
+| [`docs/notes/controls_math_reference.md`](docs/notes/controls_math_reference.md) | Every formula used, fully derived, with worked numeric examples using this project's real numbers |
+| [`docs/notes/plant_model_and_baseline.md`](docs/notes/plant_model_and_baseline.md) | Plant derivation and Stage 1 baseline results |
+| [`docs/notes/iso26262_functional_safety_mapping.md`](docs/notes/iso26262_functional_safety_mapping.md) | Documented (not certified) ISO 26262 mapping — hazard analysis, safety goals, full traceability table |
+| [`DEVLOG.md`](DEVLOG.md) | Complete development history — every bug found, diagnosed, and fixed, with root causes |
+| [`stage5_benchmarking/TEST_PROTOCOL.md`](stage5_benchmarking/TEST_PROTOCOL.md) | Full benchmark protocol, including two real design issues caught before the full run |
 
 ---
 
 ## Path to Production
 
-This is a portfolio/learning project, not a production or certified
-safety-critical system. What would genuinely change to get there:
+This is a learning and demonstration project, not a certified
+safety-critical system. What would genuinely need to change:
 
-    - Simulink/MATLAB or a certified modeling environment in place of
-      Python (do-mpc/CasADi is excellent for prototyping, not certified
-      for production safety-critical deployment)
-    - VxWorks, QNX, or a certified AUTOSAR RTOS in place of Zephyr's
-      native_sim (a real-time OS proven on real hardware, not a
-      software simulation of one)
-    - Formal IEC 61508/ISO 26262 certification, including independent
-      safety assessment — not the conceptual/illustrative mapping in
-      docs/notes/iso26262_functional_safety_mapping.md
-    - MISRA C compliance and static analysis on all embedded C code
-      (not checked against MISRA C rules in this project)
-    - Requirements-traceability tooling (e.g. DOORS), not a markdown table
-    - A dedicated, resourced safety review process, not a solo repository
-    - Real hardware validation — native_sim's simulated clock is
-      deterministic and structurally excludes physical jitter sources
-      (Stage 3 Task 12); genuine timing/jitter numbers require an actual
-      microcontroller and actuator
+| This Project | Production Would Require |
+|---|---|
+| Python (do-mpc/CasADi) | Simulink/MATLAB or a certified modeling environment |
+| Zephyr `native_sim` | VxWorks, QNX, or certified AUTOSAR RTOS on real hardware |
+| Self-reviewed ISO 26262 mapping | Independent safety assessment |
+| No static analysis | MISRA C compliance and static analysis on all embedded C |
+| Markdown traceability table | Formal requirements-traceability tooling (e.g. DOORS) |
+| Solo repository | Dedicated, resourced safety review process |
+| `native_sim`'s idealized clock | Real hardware — genuine jitter numbers require real silicon |
 
-See docs/notes/iso26262_functional_safety_mapping.md for the full,
-itemized gap list.
+Full itemized gap list:
+[`docs/notes/iso26262_functional_safety_mapping.md`](docs/notes/iso26262_functional_safety_mapping.md)
 
 ---
 
-**GitHub:** github.com/Asif-Ucchwas/controlloop-rt
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+**GitHub:** [github.com/Asif-Ucchwas/controlloop-rt](https://github.com/Asif-Ucchwas/controlloop-rt)
