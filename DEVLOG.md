@@ -660,3 +660,58 @@ shocks (smallest relative max-error increase) but structurally slower
 to settle (50Hz vs 1kHz loop rate) and less trial-to-trial consistent
 under combined stress. This multi-dimensional tradeoff, not a single
 "best" controller, is the honest and complete finding across 600 trials.
+
+## Stage 5 Task 20 — Comparison Plots, Tables & One More Finding Caught Visually
+
+Generated 5 comparison plots (rms_error, max_error, settling_time,
+chatter [log scale], mpc_constraint_violation) and a markdown results
+table from the 600-trial summary. Confirmed against benchmark_summary.csv
+- no fabricated/mismatched values.
+
+**Additional finding, visible only in the settling-time plot, not caught
+in Task 19's text summary:** MPC's settling_time under no_dist_noise
+(noise alone, no disturbance) has enormous trial-to-trial variance -
+mean=1.505s, std=1.061s (~70% relative std, range roughly 0.45-2.57s
+across the 50 trials). This is a DIFFERENT variability finding from
+Task 19's rms_error_std observation (which was specific to the
+combined dist_noise condition) - here, sensor noise ALONE, with zero
+disturbance, already makes MPC's settling behavior highly unpredictable
+trial-to-trial, even though its RMS/max tracking error stay stable
+under that same condition. PID and FF show no such settling-time
+variance under the same noise-only condition (visually flat error bars
+in the same plot).
+
+**Chatter plot confirms and refines Stage 2 Task 8's original finding:**
+MPC's chatter stays flat under noise alone (0.27 -> 0.27, no noise
+sensitivity - consistent with Task 8's original "MPC filters noise
+well" result) but jumps specifically under DISTURBANCE (0.27 -> ~1.8) -
+disturbance-driven re-planning costs MPC control smoothness; sensor
+noise does not.
+
+This is a genuine example of why visual plots matter beyond tables of
+numbers - the settling-time variance finding was not apparent from the
+printed quick-summary or even the full summary CSV read in isolation;
+it only became visible once plotted with error bars.
+
+## Stage 5 Complete (Tasks 17-20)
+
+600-trial benchmark suite comparing PID, PD+Feedforward, and MPC across
+4 disturbance/noise conditions, with a fully documented protocol, two
+real design bugs caught and fixed/documented before the full run (MPC
+setup ordering, trajectory-amplitude/constraint conflict), and six
+distinct, non-oversimplified findings:
+1. Feedforward: best baseline, most fragile under disturbance (+236%
+   max error vs PID's +35%, MPC's +13%)
+2. PID/FF chatter under noise nearly identical (167.67 vs 167.67),
+   explained precisely via feedforward's smooth/deterministic term
+3. MPC's velocity constraint: 0% violated without disturbance, 100%
+   violated with it - deterministic, not occasional
+4. MPC ~47x higher RMS-error variance under combined dist+noise stress
+5. Zero settling failures across all 600 trials
+6. MPC settling-time highly variable under noise ALONE (70% relative
+   std), a distinct finding from #4, caught only via the plots
+
+No controller "wins" outright - the honest conclusion across 600 real
+trials is a genuine multi-dimensional tradeoff, which is the strongest
+and most defensible story for both the interview narrative and the
+eventual paper's Results section.
